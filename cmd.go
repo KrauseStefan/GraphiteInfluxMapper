@@ -25,16 +25,24 @@ type filterTransformer struct {
 	allActiveUsers []byte
 }
 
-func ExtractPathValues(line []byte) (path, value, timestamp []byte) {
+func ExtractPathValues(line []byte) (path [][]byte, value, timestamp []byte) {
 	if len(line) <= 1 {
 		return
 	}
 
 	parts := bytes.Split(line, []byte{' '})
-	path = parts[0]
+	path = bytes.Split(parts[0], []byte{'.'})
 	value = parts[1]
 	timestamp = parts[2]
 	return
+}
+
+func buildLine(path [][]byte, value, timestamp []byte) []byte {
+	return bytes.Join([][]byte{
+		bytes.Join(path, []byte{'.'}),
+		value,
+		timestamp,
+	}, []byte{' '})
 }
 
 func (t filterTransformer) Transform(dst, src []byte, atEOF bool) (nDst, nSrc int, err error) {
@@ -43,21 +51,16 @@ func (t filterTransformer) Transform(dst, src []byte, atEOF bool) (nDst, nSrc in
 	lines := [][]byte{}
 	for _, line := range origLines {
 		if !bytes.HasPrefix(line, filterPrefix) {
-			_, _, timeStamp := ExtractPathValues(line)
+			path, value, timeStamp := ExtractPathValues(line)
 
-			if len(timeStamp) > 2 && !bytes.Equal(timeStamp, previousTimestamp) {
-				copy(previousTimestamp, timeStamp)
-				lines = append(lines, bytes.Join([][]byte{
-					commonPrefix,
-					copyMeasurementLabel,
-					[]byte{' '},
-					t.allActiveUsers, //value
-					[]byte{' '},
-					timeStamp, //timestamp
-				}, nil))
+			if len(path) > 1 {
+				i := 3
+				path = append(path, []byte{' '})
+				copy(path[i+1:], path[i:])
+				path[i] = bytes.Join([][]byte{[]byte("users_"), t.allActiveUsers}, nil)
 			}
 
-			lines = append(lines, line)
+			lines = append(lines, buildLine(path, value, timeStamp))
 		} else {
 			removedBytes += len(line) + 1
 			value := bytes.Split(bytes.TrimPrefix(line, filterPrefix), []byte{' '})[1]
